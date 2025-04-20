@@ -1,6 +1,7 @@
 import sys
 import os
 import os.path as osp
+
 sys.path.append(osp.abspath(osp.join(osp.dirname(__file__), "..")))
 
 import argparse
@@ -21,7 +22,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score
 
 
-from model_factory.fcn import FCN
+from model_factory.fcn import FCNWithW2VEmbedding
 from feeder.dataset import SentimentAnalysisDataset
 from utils.scheduler import WarmupCosineAnnealingScheduler
 from utils.helpers import unravel_metric_dict
@@ -34,8 +35,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch import optim
 from torch import nn
-# Mapping of ML models
-MODELS = {"logreg": LogisticRegression, "svm": LinearSVC, "rf": RandomForestClassifier}
+from torch.nn.utils.rnn import pad_sequence
 
 
 def parse_args():
@@ -87,7 +87,7 @@ def parse_args():
         help="Number of epochs for training Word2Vec (if w2v_mode=train)",
     )
 
-        # Model selection
+    # Model selection
     parser.add_argument(
         "--epochs", type=int, default=10, help="Number of epochs to train the model"
     )
@@ -99,6 +99,35 @@ def parse_args():
         type=float,
         default=0.001,
         help="Initial learning rate for training",
+    )
+
+    parser.add_argument(
+        "--hidden_size",
+        type=int,
+        default=128,
+        help="Hidden size for the fully connected neural network",
+    )
+
+    parser.add_argument(
+        "--aggregation",
+        type=str,
+        choices=["mean", "max", "min", "sum"],
+        default="mean",
+        help="Aggregation method for Word2Vec embeddings",
+    )
+
+    parser.add_argument(
+        "--freeze_embeddings",
+        type=bool,
+        default=True,
+        help="Whether to freeze the Word2Vec embeddings during training",
+    )
+
+    parser.add_argument(
+        "--dropout_rate",
+        type=float,
+        default=0.3,
+        help="Dropout rate used in the fully connected layers.",
     )
 
     # Output directory
@@ -127,6 +156,7 @@ def parse_nested_args(arg_str):
                     args_dict[key] = value
     return args_dict
 
+
 def train_word2vec(
     sentences, vector_size=100, window=5, min_count=2, workers=4, epochs=5
 ):
@@ -151,12 +181,13 @@ def finetune_word2vec(existing_model, new_sentences, epochs=5):
     return existing_model
 
 
-def document_vector(w2v_vectors, doc):
+def tokenoze_vector(word2idx, doc):
     """Computes the mean Word2Vec vector for a document."""
-    words = [word for word in doc if word in w2v_vectors]
+    words = [word2idx[word] for word in doc if word in word2idx]
     if len(words) == 0:
-        return np.zeros(w2v_vectors.vector_size)
-    return np.mean(w2v_vectors[words], axis=0)
+        return []
+    return words
+
 
 def prepare_w2v_data(docs):
     """Preprocesses text by removing punctuation and tokenizing."""
@@ -164,10 +195,14 @@ def prepare_w2v_data(docs):
     all_sentences = []
     for doc in docs:
         sentences = nltk.sent_tokenize(doc)
-        sentences = [sent.translate(str.maketrans("", "", string.punctuation)) for sent in sentences]
+        sentences = [
+            sent.translate(str.maketrans("", "", string.punctuation))
+            for sent in sentences
+        ]
         sentences = [nltk.word_tokenize(sent) for sent in sentences]
         all_sentences.extend(sentences)
     return all_sentences
+
 
 def prepare_input_data(docs):
     """Preprocesses text by removing punctuation and tokenizing."""
@@ -175,9 +210,42 @@ def prepare_input_data(docs):
     all_sentences = []
     for doc in docs:
         words = nltk.word_tokenize(doc)
-        words = [word.translate(str.maketrans("", "", string.punctuation)) for word in words]
+        words = [
+            word.translate(str.maketrans("", "", string.punctuation)) for word in words
+        ]
         all_sentences.append(words)
     return all_sentences
+
+
+def collate_fn(batch):
+    """
+    Collates a batch of data and applies padding.
+
+    Args:
+        batch (list): List of samples in the batch
+        Due to the behavior of Pod5IterDataset,
+        the batch size is determined in the Dataset instead of DataLoader.
+        Thus, the batch size is always 1.
+        We will make sure that the batch size is 1 in the DataLoader,
+        and we squeeze the batch dimension here.
+
+    Returns:
+        dict: Dictionary containing the batched inputs and labels
+    """
+    vectors = [item["inputs"]["vector"] for item in batch]
+    categories = torch.tensor([item["labels"]["sentiment"] for item in batch])
+
+    padded_vectors = pad_sequence(vectors, batch_first=True, padding_value=0)
+
+    return {
+        "inputs": {
+            "vector": padded_vectors,
+        },
+        "labels": {
+            "sentiment": categories,
+        },
+    }
+
 
 def main():
     args = parse_args()
@@ -186,10 +254,15 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    logger = Logger(name="SentimentAnalysis_ML_W2V", log_file=osp.join(args.output_dir, "logging.log"))
+    logger = Logger(
+        name="SentimentAnalysis_ML_W2V",
+        log_file=osp.join(args.output_dir, "logging.log"),
+    )
 
     # Load data
-    logger.log_message(f"Training a fully connected neural network with Word2Vec embeddings for sentiment analysis.")
+    logger.log_message(
+        f"Training a fully connected neural network with Word2Vec embeddings for sentiment analysis."
+    )
     logger.log_message("===========================================")
     logger.log_message("Loading data...")
     train_df = pd.read_csv(osp.join(args.csv_dir, "train.csv"))
@@ -208,7 +281,9 @@ def main():
 
     # Word2Vec Handling
     if args.w2v_mode == "pretrained":
-        logger.log_message(f"Loading pretrained Word2Vec model from {args.pretrained_path}")
+        logger.log_message(
+            f"Loading pretrained Word2Vec model from {args.pretrained_path}"
+        )
         w2v_vectors = KeyedVectors.load_word2vec_format(
             args.pretrained_path, binary=True
         )
@@ -252,21 +327,36 @@ def main():
     logger.log_message("Word2Vec model prepared successfully.")
     logger.log_message("===========================================")
 
+    logger.log_message("Creating an embedding matrix from the Word2Vec word vectors...")
+    train_sentences = prepare_input_data(train_df["review_cleaned"].tolist())
+    vocab = {
+        word for sentence in train_sentences for word in sentence if word in w2v_vectors
+    }
+    word2idx = {word: idx + 1 for idx, word in enumerate(vocab)}
+    idx2word = {idx: word for idx, word in word2idx.items()}
+    embedding_dim = w2v_vectors.vector_size
+    embedding_matrix = np.zeros((len(word2idx) + 1, embedding_dim), dtype=np.float32)
+    for word, idx in word2idx.items():
+        embedding_matrix[idx] = w2v_vectors[word]
+    logger.log_message("Embedding matrix created successfully.")
+    logger.log_message(f"Embedding matrix shape: {embedding_matrix.shape}")
+    logger.log_message("===========================================")
+
     # Vectorize text data
-    logger.log_message("Vectorizing text data...")
+    logger.log_message("Tokenizing and vectorizing text data...")
 
     train_sentences = prepare_input_data(train_df["review_cleaned"].tolist())
     val_sentences = prepare_input_data(val_df["review_cleaned"].tolist())
     test_sentences = prepare_input_data(test_df["review_cleaned"].tolist())
 
-    X_train = np.array([document_vector(w2v_vectors, text) for text in train_sentences])
-    X_val = np.array([document_vector(w2v_vectors, text) for text in val_sentences])
-    X_test = np.array([document_vector(w2v_vectors, text) for text in test_sentences])
+    X_train = [tokenoze_vector(word2idx, text) for text in train_sentences]
+    X_val = [tokenoze_vector(word2idx, text) for text in val_sentences]
+    X_test = [tokenoze_vector(word2idx, text) for text in test_sentences]
     y_train, y_val, y_test = train_df["label"], val_df["label"], test_df["label"]
-    logger.log_message("Text vectorization done. Data dimensions:")
-    logger.log_message(f"X_train: {X_train.shape}, y_train: {y_train.shape}")
-    logger.log_message(f"X_val: {X_val.shape}, y_val: {y_val.shape}")
-    logger.log_message(f"X_test: {X_test.shape}, y_test: {y_test.shape}")
+    logger.log_message("Text tokenization done. Data lengths:")
+    logger.log_message(f"X_train: {len(X_train)}, y_train: {len(y_train)}")
+    logger.log_message(f"X_val: {len(X_val)}, y_val: {len(y_val)}")
+    logger.log_message(f"X_test: {len(X_test)}, y_test: {len(y_test)}")
     logger.log_message("===========================================")
 
     # Initialize model
@@ -274,16 +364,25 @@ def main():
     val_dataset = SentimentAnalysisDataset(X_val, y_val)
     test_dataset = SentimentAnalysisDataset(X_test, y_test)
     train_dataloader = DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True
+        train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
     )
-    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+    val_dataloader = DataLoader(
+        val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn
+    )
     test_dataloader = DataLoader(
-        test_dataset, batch_size=args.batch_size, shuffle=False
+        test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn
     )
 
     logger.log_message("Preparing model...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = FCN(input_size=X_train.shape[1], hidden_size=128, output_size=2)
+    model = FCNWithW2VEmbedding(
+        embedding_weights=embedding_matrix,
+        freeze_embeddings=args.freeze_embeddings,
+        hidden_size=args.hidden_size,
+        aggregator=args.aggregation,
+        output_size=2,
+        dropout_rate=args.dropout_rate,
+    )
     optimizer = optim.Adam(model.parameters(), lr=args.base_lr)
     criterion = nn.CrossEntropyLoss()
     logger.log_message("Model prepared successfully.")
@@ -320,27 +419,25 @@ def main():
     start_time = time.time()
     for epoch in range(args.epochs):
         train_metrics, train_loss = runner.run_epoch("train", epoch, train_dataloader)
-        val_metrics, val_loss = runner.run_epoch(
-            "validate", epoch, val_dataloader
-        )
+        val_metrics, val_loss = runner.run_epoch("validate", epoch, val_dataloader)
         train_metrics = unravel_metric_dict(train_metrics)
         val_metrics = unravel_metric_dict(val_metrics)
-        logger.log_training(epoch+1, train_loss, train_metrics, optimizer.param_groups[0]["lr"])
-        logger.log_validation(epoch+1, val_loss, val_metrics)
+        logger.log_training(
+            epoch + 1, train_loss, train_metrics, optimizer.param_groups[0]["lr"]
+        )
+        logger.log_validation(epoch + 1, val_loss, val_metrics)
         plotter.update(epoch, train_metrics, val_metrics, train_loss, val_loss)
 
     train_time = time.time() - start_time
     plotter.close()
-    
+
     logger.log_message(f"Training done in {train_time:.2f} seconds.")
     logger.log_message("===========================================")
 
     logger.log_message("Evaluating model on Train, Validation, and Test sets...")
     # Evaluate model
     start_time = time.time()
-    train_gts, train_logits, _ = runner.run_epoch(
-        "test", epoch, train_dataloader
-    )
+    train_gts, train_logits, _ = runner.run_epoch("test", epoch, train_dataloader)
     train_eval_time = time.time() - start_time
 
     train_probs = torch.softmax(torch.stack(train_logits["sentiment"]), dim=1)
@@ -348,18 +445,14 @@ def main():
     train_gts = torch.tensor(train_gts["sentiment"])
 
     start_time = time.time()
-    val_gts, val_logits, _ = runner.run_epoch(
-        "test", epoch, val_dataloader
-    )
+    val_gts, val_logits, _ = runner.run_epoch("test", epoch, val_dataloader)
     val_eval_time = time.time() - start_time
     val_probs = torch.softmax(torch.stack(val_logits["sentiment"]), dim=1)
     val_preds = torch.argmax(val_probs, dim=1).float()
     val_gts = torch.tensor(val_gts["sentiment"])
 
     start_time = time.time()
-    test_gts, test_logits, _ = runner.run_epoch(
-        "test", epoch, test_dataloader
-    )
+    test_gts, test_logits, _ = runner.run_epoch("test", epoch, test_dataloader)
     test_eval_time = time.time() - start_time
     test_probs = torch.softmax(torch.stack(test_logits["sentiment"]), dim=1)
     test_preds = torch.argmax(test_probs, dim=1).float()
@@ -413,7 +506,6 @@ def main():
     logger.log_message("Training complete. Model and logs saved!")
     logger.log_message("===========================================")
     logger.close()
-
 
 
 if __name__ == "__main__":
