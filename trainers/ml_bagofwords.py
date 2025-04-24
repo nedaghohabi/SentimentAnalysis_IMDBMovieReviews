@@ -18,6 +18,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import classification_report, accuracy_score
 from utils.models_utils import train_ml_model, evaluate_ml_model
 from utils.logger import Logger
+from feeder.utils import load_and_split_data
 
 # Mapping of vectorizers
 VECTORIZERS = {"count": CountVectorizer, "tfidf": TfidfVectorizer}
@@ -36,7 +37,7 @@ def parse_args():
 
     # File paths
     parser.add_argument(
-        "--csv_dir",
+        "--input_csv",
         type=str,
         required=True,
         help="Path to directory containing train, val, and test CSV files",
@@ -126,10 +127,8 @@ def main():
     logger.log_message(f"Training a {args.model} model with {args.vectorizer} embeddings for sentiment analysis.")
     logger.log_message("===========================================")
     logger.log_message("Loading data...")
-
-    train_df = pd.read_csv(os.path.join(args.csv_dir, "train.csv"))
-    val_df = pd.read_csv(os.path.join(args.csv_dir, "validation.csv"))
-    test_df = pd.read_csv(os.path.join(args.csv_dir, "test.csv"))
+    
+    train_df, val_df, test_df = load_and_split_data(args.input_csv)
 
     # Ensure expected columns exist
     for df_name, df in zip(["train", "val", "test"], [train_df, val_df, test_df]):
@@ -141,6 +140,7 @@ def main():
     logger.log_message("===========================================")
     logger.log_message("Vectorizing text data...")
     # Text vectorization
+    vectorizer_params["ngram_range"]=(1,2)
     vectorizer = VECTORIZERS[args.vectorizer](**vectorizer_params)
     params_str = ", ".join([f"{k}={v}" for k, v in vectorizer.get_params().items()])
     logger.log_message(f"Using {vectorizer.__class__.__name__} vectorizer with params: {params_str}")

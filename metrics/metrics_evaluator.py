@@ -50,15 +50,14 @@ class MetricsEvaluator:
             for metric_name, total_value in metric_values.items():
                 if self.distributed:
                     total_value = self._average_across_gpus(total_value)
+                else: 
+                    total_value = total_value.detach().cpu().item()
                 final_metrics[task][metric_name] = total_value / batch_count
 
         return final_metrics
     
     def _average_across_gpus(self, tensor_value):
         """Average a scalar tensor across all GPUs."""
-        if not self.distributed:
-            return tensor_value
-
         tensor = torch.tensor([tensor_value], dtype=torch.float32, device=self.device)
         dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
         return tensor.item() / dist.get_world_size()

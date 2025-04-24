@@ -45,7 +45,7 @@ class EpochRunner:
 
     def to_cpu(self, tensor_dict):
         return {
-            key: tensor.detach().cpu() for key, tensor in tensor_dict.items()
+            key: tensor.detach().cpu().numpy() for key, tensor in tensor_dict.items()
         }
 
     def average_across_gpus(self, tensor_value):
@@ -103,6 +103,7 @@ class EpochRunner:
                 self.metrics_evaluator.reset()
             else:
                 metrics_dict = {}
+
             epoch_loss = running_loss / len(dataloader)
 
             return metrics_dict, epoch_loss
@@ -148,6 +149,7 @@ class EpochRunner:
                 self.metrics_evaluator.reset()
             else:
                 metrics_dict = {}
+                
             epoch_loss = running_loss / len(dataloader)
 
             return metrics_dict, epoch_loss
@@ -175,6 +177,11 @@ class EpochRunner:
                 with torch.amp.autocast(device_type="cuda", enabled=self.use_amp):
                     batch_logits = self.model(**inputs)
 
+                if self.metrics_evaluator:
+                    self.metrics_evaluator.update_metrics(
+                        labels, batch_logits
+                    )
+
                 labels = self.to_cpu(labels)
                 batch_logits = self.to_cpu(batch_logits)
 
@@ -188,7 +195,13 @@ class EpochRunner:
                         self.to_cpu(batch_feats)
                     )
 
-            return all_gts, all_logits, all_feats
+            if self.metrics_evaluator:
+                metrics_dict = self.metrics_evaluator.compute_final_metrics()
+                self.metrics_evaluator.reset()
+            else:
+                metrics_dict = {}
+
+            return metrics_dict, all_gts, all_logits, all_feats
 
     def inference_epoch(self, epoch_num, dataloader):
         self.model.eval()

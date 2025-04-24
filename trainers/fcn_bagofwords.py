@@ -1,6 +1,7 @@
 import sys
 import os
 import os.path as osp
+import random
 
 sys.path.append(osp.abspath(osp.join(osp.dirname(__file__), "..")))
 
@@ -22,6 +23,7 @@ from utils.logger import Logger
 from runners.epoch_runner import EpochRunner
 from metrics import accuracy, precision, recall, MetricsEvaluator
 from visualization.training_visualizer import TrainingPlotter
+from feeder.utils import load_and_split_data
 
 import torch
 from torch.utils.data import DataLoader
@@ -38,7 +40,7 @@ def parse_args():
 
     # File paths
     parser.add_argument(
-        "--csv_dir",
+        "--input_csv",
         type=str,
         required=True,
         help="Path to directory containing train, val, and test CSV files",
@@ -110,8 +112,16 @@ def parse_nested_args(arg_str):
                     args_dict[key] = value  # Default to string if conversion fails
     return args_dict
 
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # if using CUDA
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def main():
+    set_seed(42)
     args = parse_args()
     vectorizer_params = parse_nested_args(args.vectorizer_args)
 
@@ -125,10 +135,9 @@ def main():
     logger.log_message(f"Training a fully connected neural network with with {args.vectorizer} embeddings for sentiment analysis.")
     logger.log_message("===========================================")
     logger.log_message("Loading data...")
-    train_df = pd.read_csv(os.path.join(args.csv_dir, "train.csv"))
-    val_df = pd.read_csv(os.path.join(args.csv_dir, "validation.csv"))
-    test_df = pd.read_csv(os.path.join(args.csv_dir, "test.csv"))
-
+    
+    train_df, val_df, test_df = load_and_split_data(args.input_csv)
+    
     # Ensure expected columns exist
     for df_name, df in zip(["train", "val", "test"], [train_df, val_df, test_df]):
         if not ("review_cleaned" in df.columns and "label" in df.columns):
@@ -169,6 +178,7 @@ def main():
     logger.log_message("Preparing model...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = FCN(input_size=X_train.shape[1], hidden_size=128, output_size=2)
+    model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.base_lr)
     criterion = nn.CrossEntropyLoss()
     logger.log_message("Model prepared successfully.")
@@ -187,7 +197,9 @@ def main():
                 (precision, {"from_logits": True, "binary": False}),
                 (recall, {"from_logits": True, "binary": False}),
             ]
-        }
+        },
+        distributed=False,
+        device=device,
     )
     
     runner = EpochRunner(
@@ -203,16 +215,31 @@ def main():
 
     logger.log_message("Training model...")
     start_time = time.time()
+    best_val_acc = -1
+    best_model_state = None
+    
     for epoch in range(args.epochs):
         train_metrics, train_loss = runner.run_epoch("train", epoch, train_dataloader)
-        val_metrics, val_loss = runner.run_epoch(
-            "validate", epoch, val_dataloader
-        )
+        val_metrics, val_loss = runner.run_epoch("validate", epoch, val_dataloader)
+    
         train_metrics = unravel_metric_dict(train_metrics)
         val_metrics = unravel_metric_dict(val_metrics)
-        logger.log_training(epoch+1, train_loss, train_metrics, optimizer.param_groups[0]["lr"])
-        logger.log_validation(epoch+1, val_loss, val_metrics)
+    
+        # Track the best model
+        val_acc = val_metrics["sentiment_accuracy"]
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_model_state = runner.model.state_dict()
+    
+        logger.log_training(
+            epoch + 1, train_loss, train_metrics, optimizer.param_groups[0]["lr"]
+        )
+        logger.log_validation(epoch + 1, val_loss, val_metrics)
         plotter.update(epoch, train_metrics, val_metrics, train_loss, val_loss)
+    
+    # Restore best model state
+    if best_model_state is not None:
+        runner.model.load_state_dict(best_model_state)
 
     train_time = time.time() - start_time
     plotter.close()
@@ -221,36 +248,37 @@ def main():
     logger.log_message("===========================================")
 
     logger.log_message("Evaluating model on Train, Validation, and Test sets...")
-    # Evaluate model
     
+    # Evaluate model
     start_time = time.time()
-    train_gts, train_logits, _ = runner.run_epoch(
+    _, train_gts, train_logits, _ = runner.run_epoch(
         "test", epoch, train_dataloader
     )
     train_eval_time = time.time() - start_time
-
-    train_probs = torch.softmax(torch.stack(train_logits["sentiment"]), dim=1)
-    train_preds = torch.argmax(train_probs, dim=1).float()
-    train_gts = torch.tensor(train_gts["sentiment"])
+    train_logits = np.stack(train_logits["sentiment"])
+    train_probs = np.exp(train_logits) / np.sum(np.exp(train_logits), axis=1, keepdims=True)
+    train_preds = np.argmax(train_probs, axis=1).astype(np.float32)
+    train_gts = np.array(train_gts["sentiment"])
 
     start_time = time.time()
-    val_gts, val_logits, _ = runner.run_epoch(
+    _, val_gts, val_logits, _ = runner.run_epoch(
         "test", epoch, val_dataloader
     )
     val_eval_time = time.time() - start_time
-    val_probs = torch.softmax(torch.stack(val_logits["sentiment"]), dim=1)
-    val_preds = torch.argmax(val_probs, dim=1).float()
-    val_gts = torch.tensor(val_gts["sentiment"])
+    val_logits = np.stack(val_logits["sentiment"])
+    val_probs = np.exp(val_logits) / np.sum(np.exp(val_logits), axis=1, keepdims=True)
+    val_preds = np.argmax(val_probs, axis=1).astype(np.float32)
+    val_gts = np.array(val_gts["sentiment"])
 
     start_time = time.time()
-    test_gts, test_logits, _ = runner.run_epoch(
+    _, test_gts, test_logits, _ = runner.run_epoch(
         "test", epoch, test_dataloader
     )
     test_eval_time = time.time() - start_time
-    test_probs = torch.softmax(torch.stack(test_logits["sentiment"]), dim=1)
-    test_preds = torch.argmax(test_probs, dim=1).float()
-    test_gts = torch.tensor(test_gts["sentiment"])
-
+    test_logits = np.stack(test_logits["sentiment"])
+    test_probs = np.exp(test_logits) / np.sum(np.exp(test_logits), axis=1, keepdims=True)
+    test_preds = np.argmax(test_probs, axis=1).astype(np.float32)
+    test_gts = np.array(test_gts["sentiment"])
 
     train_report = classification_report(train_gts, train_preds, output_dict=True)
     train_acc = accuracy_score(y_train, train_preds)

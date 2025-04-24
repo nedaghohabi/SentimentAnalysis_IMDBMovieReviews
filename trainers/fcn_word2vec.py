@@ -1,6 +1,7 @@
 import sys
 import os
 import os.path as osp
+import random
 
 sys.path.append(osp.abspath(osp.join(osp.dirname(__file__), "..")))
 
@@ -13,6 +14,7 @@ import nltk
 import string
 
 from utils.logger import Logger
+from collections import Counter
 
 from pathlib import Path
 from gensim.models import Word2Vec, KeyedVectors
@@ -27,6 +29,7 @@ from feeder.dataset import SentimentAnalysisDataset
 from utils.scheduler import WarmupCosineAnnealingScheduler
 from utils.helpers import unravel_metric_dict
 from utils.logger import Logger
+from feeder.utils import load_and_split_data
 from runners.epoch_runner import EpochRunner
 from metrics import accuracy, precision, recall, MetricsEvaluator
 from visualization.training_visualizer import TrainingPlotter
@@ -45,7 +48,7 @@ def parse_args():
 
     # File paths
     parser.add_argument(
-        "--csv_dir",
+        "--input_csv",
         type=str,
         required=True,
         help="Path to directory containing train, val, and test CSV files",
@@ -55,7 +58,7 @@ def parse_args():
     parser.add_argument(
         "--w2v_mode",
         type=str,
-        choices=["pretrained", "train", "finetune"],
+        choices=["pretrained", "train", "finetune", "none"],
         required=True,
         help="Use pretrained Word2Vec, train from scratch, or finetune an existing model.",
     )
@@ -109,6 +112,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--vocab_size",
+        type=int,
+        default=40000,
+        help="Hidden size for the fully connected neural network",
+    )
+
+    parser.add_argument(
         "--aggregation",
         type=str,
         choices=["mean", "max", "min", "sum"],
@@ -118,8 +128,7 @@ def parse_args():
 
     parser.add_argument(
         "--freeze_embeddings",
-        type=bool,
-        default=True,
+        action="store_true",
         help="Whether to freeze the Word2Vec embeddings during training",
     )
 
@@ -246,8 +255,16 @@ def collate_fn(batch):
         },
     }
 
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # if using CUDA
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def main():
+    set_seed(42)
     args = parse_args()
 
     # Ensure output directory exists
@@ -265,9 +282,8 @@ def main():
     )
     logger.log_message("===========================================")
     logger.log_message("Loading data...")
-    train_df = pd.read_csv(osp.join(args.csv_dir, "train.csv"))
-    val_df = pd.read_csv(osp.join(args.csv_dir, "validation.csv"))
-    test_df = pd.read_csv(osp.join(args.csv_dir, "test.csv"))
+
+    train_df, val_df, test_df = load_and_split_data(args.input_csv)
 
     # Ensure expected columns exist
     for df_name, df in zip(["train", "val", "test"], [train_df, val_df, test_df]):
@@ -323,21 +339,36 @@ def main():
             w2v_train_sentences = prepare_w2v_data(train_df["review_cleaned"].tolist())
             w2v_model = finetune_word2vec(w2v_model, w2v_train_sentences, args.epochs)
             w2v_vectors = w2v_model.wv  # Convert to KeyedVectors for compatibility
+    elif args.w2v_mode == "none":
+        logger.log_message("Using random embeddings. Embedding matrix will be learned from scratch.")
+        w2v_vectors = None
 
     logger.log_message("Word2Vec model prepared successfully.")
     logger.log_message("===========================================")
 
-    logger.log_message("Creating an embedding matrix from the Word2Vec word vectors...")
     train_sentences = prepare_input_data(train_df["review_cleaned"].tolist())
-    vocab = {
-        word for sentence in train_sentences for word in sentence if word in w2v_vectors
-    }
-    word2idx = {word: idx + 1 for idx, word in enumerate(vocab)}
-    idx2word = {idx: word for idx, word in word2idx.items()}
-    embedding_dim = w2v_vectors.vector_size
-    embedding_matrix = np.zeros((len(word2idx) + 1, embedding_dim), dtype=np.float32)
-    for word, idx in word2idx.items():
-        embedding_matrix[idx] = w2v_vectors[word]
+    if w2v_vectors is not None:
+        logger.log_message("Creating an embedding matrix from the Word2Vec word vectors...")
+        vocab = {
+            word for sentence in train_sentences for word in sentence if word in w2v_vectors
+        }
+        word2idx = {word: idx + 1 for idx, word in enumerate(vocab)}
+        idx2word = {idx: word for idx, word in word2idx.items()}
+        embedding_dim = w2v_vectors.vector_size
+        embedding_matrix = np.zeros((len(word2idx) + 1, embedding_dim), dtype=np.float32)
+        for word, idx in word2idx.items():
+            embedding_matrix[idx] = w2v_vectors[word]
+    else:
+        logger.log_message("Creating an embedding matrix from the top occuring words in the whole documents...")
+        all_words = [word for sentence in train_sentences for word in sentence]
+        word_freq = Counter(all_words)
+        top_k = args.vocab_size  # add this as a new argparse argument
+        most_common = word_freq.most_common(top_k)
+        vocab = {word for word, _ in most_common}
+        word2idx = {word: idx + 1 for idx, word in enumerate(vocab)}
+        idx2word = {idx: word for idx, word in word2idx.items()}
+        embedding_dim = args.vector_size
+        embedding_matrix = np.random.normal(0, 1, (len(word2idx) + 1, embedding_dim)).astype(np.float32)
     logger.log_message("Embedding matrix created successfully.")
     logger.log_message(f"Embedding matrix shape: {embedding_matrix.shape}")
     logger.log_message("===========================================")
@@ -383,6 +414,7 @@ def main():
         output_size=2,
         dropout_rate=args.dropout_rate,
     )
+    model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.base_lr)
     criterion = nn.CrossEntropyLoss()
     logger.log_message("Model prepared successfully.")
@@ -417,16 +449,31 @@ def main():
 
     logger.log_message("Training model...")
     start_time = time.time()
+    best_val_acc = -1
+    best_model_state = None
+    
     for epoch in range(args.epochs):
         train_metrics, train_loss = runner.run_epoch("train", epoch, train_dataloader)
         val_metrics, val_loss = runner.run_epoch("validate", epoch, val_dataloader)
+    
         train_metrics = unravel_metric_dict(train_metrics)
         val_metrics = unravel_metric_dict(val_metrics)
+    
+        # Track the best model
+        val_acc = val_metrics["sentiment_accuracy"]
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_model_state = runner.model.state_dict()
+    
         logger.log_training(
             epoch + 1, train_loss, train_metrics, optimizer.param_groups[0]["lr"]
         )
         logger.log_validation(epoch + 1, val_loss, val_metrics)
         plotter.update(epoch, train_metrics, val_metrics, train_loss, val_loss)
+    
+    # Restore best model state
+    if best_model_state is not None:
+        runner.model.load_state_dict(best_model_state)
 
     train_time = time.time() - start_time
     plotter.close()
@@ -435,28 +482,37 @@ def main():
     logger.log_message("===========================================")
 
     logger.log_message("Evaluating model on Train, Validation, and Test sets...")
+    
     # Evaluate model
     start_time = time.time()
-    train_gts, train_logits, _ = runner.run_epoch("test", epoch, train_dataloader)
+    _, train_gts, train_logits, _ = runner.run_epoch(
+        "test", epoch, train_dataloader
+    )
     train_eval_time = time.time() - start_time
-
-    train_probs = torch.softmax(torch.stack(train_logits["sentiment"]), dim=1)
-    train_preds = torch.argmax(train_probs, dim=1).float()
-    train_gts = torch.tensor(train_gts["sentiment"])
+    train_logits = np.stack(train_logits["sentiment"])
+    train_probs = np.exp(train_logits) / np.sum(np.exp(train_logits), axis=1, keepdims=True)
+    train_preds = np.argmax(train_probs, axis=1).astype(np.float32)
+    train_gts = np.array(train_gts["sentiment"])
 
     start_time = time.time()
-    val_gts, val_logits, _ = runner.run_epoch("test", epoch, val_dataloader)
+    _, val_gts, val_logits, _ = runner.run_epoch(
+        "test", epoch, val_dataloader
+    )
     val_eval_time = time.time() - start_time
-    val_probs = torch.softmax(torch.stack(val_logits["sentiment"]), dim=1)
-    val_preds = torch.argmax(val_probs, dim=1).float()
-    val_gts = torch.tensor(val_gts["sentiment"])
+    val_logits = np.stack(val_logits["sentiment"])
+    val_probs = np.exp(val_logits) / np.sum(np.exp(val_logits), axis=1, keepdims=True)
+    val_preds = np.argmax(val_probs, axis=1).astype(np.float32)
+    val_gts = np.array(val_gts["sentiment"])
 
     start_time = time.time()
-    test_gts, test_logits, _ = runner.run_epoch("test", epoch, test_dataloader)
+    _, test_gts, test_logits, _ = runner.run_epoch(
+        "test", epoch, test_dataloader
+    )
     test_eval_time = time.time() - start_time
-    test_probs = torch.softmax(torch.stack(test_logits["sentiment"]), dim=1)
-    test_preds = torch.argmax(test_probs, dim=1).float()
-    test_gts = torch.tensor(test_gts["sentiment"])
+    test_logits = np.stack(test_logits["sentiment"])
+    test_probs = np.exp(test_logits) / np.sum(np.exp(test_logits), axis=1, keepdims=True)
+    test_preds = np.argmax(test_probs, axis=1).astype(np.float32)
+    test_gts = np.array(test_gts["sentiment"])
 
     train_report = classification_report(train_gts, train_preds, output_dict=True)
     train_acc = accuracy_score(y_train, train_preds)

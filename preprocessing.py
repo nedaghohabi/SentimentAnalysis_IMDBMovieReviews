@@ -34,6 +34,7 @@ def spell_correction(words, sym_spell):
             continue
         suggestions = sym_spell.lookup(word, Verbosity.CLOSEST, max_edit_distance=2)
         suggestion = suggestions[0].term if suggestions else word
+        suggestion = suggestion.lower()
         corrected_words.append(suggestion)
     return corrected_words
 

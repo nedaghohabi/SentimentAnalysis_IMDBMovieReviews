@@ -20,6 +20,7 @@ from sklearn.svm import LinearSVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score
 from utils.models_utils import train_ml_model, evaluate_ml_model
+from feeder.utils import load_and_split_data
 
 
 # Mapping of ML models
@@ -33,7 +34,7 @@ def parse_args():
 
     # File paths
     parser.add_argument(
-        "--csv_dir",
+        "--input_csv",
         type=str,
         required=True,
         help="Path to directory containing train, val, and test CSV files",
@@ -183,11 +184,8 @@ def main():
     logger.log_message(f"Training a {args.model} model with word2vec embeddings for sentiment analysis.")
     logger.log_message("===========================================")
     logger.log_message("Loading data...")
-
-    # Load data
-    train_df = pd.read_csv(osp.join(args.csv_dir, "train.csv"))
-    val_df = pd.read_csv(osp.join(args.csv_dir, "validation.csv"))
-    test_df = pd.read_csv(osp.join(args.csv_dir, "test.csv"))
+    
+    train_df, val_df, test_df = load_and_split_data(args.input_csv)
 
     # Ensure expected columns exist
     for df_name, df in zip(["train", "val", "test"], [train_df, val_df, test_df]):

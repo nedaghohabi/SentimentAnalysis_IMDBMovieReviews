@@ -1,9 +1,4 @@
 from utils.timeit import timeit
-from runners.epoch_runner import EpochRunner
-import torch
-from torch.utils.data import DataLoader, TensorDataset
-import torch.optim as optim
-import torch.nn as nn
 
 
 @timeit
