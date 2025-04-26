@@ -2,9 +2,9 @@
 
 Contact:  
 **Pooria daneshvar Kakhaki**  
-Email: [daneshvarkakhaki.p@northeastern.edu](mailto:daneshvarkakhaki.p@northeastern.edu)  
+Email: [daneshvarkakhaki.p@northeastern.edu](mailto:daneshvarkakhaki.p@northeastern.edu)  Department of Computer Science, Northeastern University, Boston, MA
 **Neda Ghohabi Esfahani**  
-Email: [ghohabiesfahani.n@northeastern.edu](mailto:ghohabiesfahani.n@northeastern.edu)
+Email: [ghohabiesfahani.n@northeastern.edu](mailto:ghohabiesfahani.n@northeastern.edu) Department of Bioengineering, Northeastern University
 
 ## Table of Contents
 
