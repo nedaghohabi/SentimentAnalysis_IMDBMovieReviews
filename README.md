@@ -7,6 +7,15 @@ Email: [daneshvarkakhaki.p@northeastern.edu](mailto:daneshvarkakhaki.p@northeast
 **Neda Ghohabi Esfahani**  
 Email: [ghohabiesfahani.n@northeastern.edu](mailto:ghohabiesfahani.n@northeastern.edu) Department of Bioengineering, Northeastern University
 
+> ## ⚠️ Important Notice
+> 
+> **To demo the repository**, please refer to the instructions provided below.  
+> Make sure you have the required environment set up first by installing dependencies via `requirements.txt`.  
+> Further steps to run the demo will be detailed shortly.
+>
+> 🔴 *Note: Failing to install the required packages or correctly set up the dataset may result in errors during the demo.*
+
+
 ## Table of Contents
 
 - [Introduction](#introduction)
@@ -74,27 +83,5 @@ symspellpy
 tqdm
 ```
 
-## Methodology
-### Preprocessing:
-We applied text normalization techniques including lowercasing, HTML and URL removal, stopword filtering, punctuation removal, and lemmatization. Spell correction was also used to reduce noise. Preprocessing was implemented with NLTK, regular expressions, and SymSpell.
-
-Text Representation:
-We explored multiple input representations, including:
-Bag-of-Words (binary and count) and TF-IDF for classical models.
-Word embeddings, including pretrained Word2Vec, domain-trained Word2Vec, and randomly initialized embeddings.
-Native tokenizers (WordPiece, Byte-Pair Encoding) for Transformer models.
-
-## Modeling Approaches
-
-### Classical ML models
-Logistic Regression, Random Forest.
-
-### Deep learning models
-Fully Connected Networks (FCNs), Recurrent Neural Networks (RNNs), and Long Short-Term Memory Networks (LSTMs).
-
-### Transformer models
-Custom Transformers trained from scratch and fine-tuned pretrained models (DistilBERT, RoBERTa), using various fine-tuning strategies.
-Evaluation:
-Model performance was evaluated primarily using accuracy, along with F1-score, precision, and recall, on the balanced IMDb test set.
 
 
