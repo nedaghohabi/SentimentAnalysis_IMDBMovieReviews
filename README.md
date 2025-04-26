@@ -38,22 +38,13 @@ You will need additional info including logs and required files to reuse the tra
 ## Table of Contents
 
 - [Introduction](#introduction)
-- [Dataset](#dataset)
 - [Environment](#environment)
+- [Dataset](#dataset)
 
 
 ## Introduction: 
 
 This project focuses on sentiment analysis of movie reviews using the [IMDb Large Movie Review Dataset](https://www.kaggle.com/datasets/lakshmi25npathi/imdb-dataset-of-50k-movie-reviews?datasetId=134715&sortBy=dateRun&tab=profile), which consists of 50,000 reviews evenly split between positive and negative sentiments. We investigate a wide range of machine learning and deep learning approaches, including classical models (Logistic Regression, Random Forest with Bag-of-Words and TF-IDF), Fully Connected Networks and LSTMs with various word embeddings, and Transformer-based architectures such as DistilBERT and RoBERTa. Models were evaluated using accuracy, F1-score, precision, and recall, offering a comprehensive comparison across embedding strategies, fine-tuning techniques, and model complexities for sentiment classification.
-
-## Dataset
-We use the Large Movie Review Dataset (IMDb), which contains 100,000 movie reviews, including 50,000 labeled examples and 50,000 unlabeled examples. ![dataset](images/dataset_sankey.png) The labeled portion is evenly split into a training set and a test set, each with 25,000 reviews (12,500 positive and 12,500 negative). The unlabeled reviews, typically used for clustering or zero-shot tasks, are excluded from all experiments in this project. Since no predefined validation split is provided, we reserve 20% of the training data for validation. This results in 20,000 training samples (10,000 positive, 10,000 negative) and 5,000 validation samples (2,500 positive, 2,500 negative).
-
-To download and prepared the dataset, run the following script:
-
-```shell
-pip prepare_dataset.py
-```
 
 ## Environment
 
@@ -102,5 +93,38 @@ symspellpy
 tqdm
 ```
 
+## Dataset
+We use the Large Movie Review Dataset (IMDb), which contains 100,000 movie reviews, including 50,000 labeled examples and 50,000 unlabeled examples. ![dataset](images/dataset_sankey.png) The labeled portion is evenly split into a training set and a test set, each with 25,000 reviews (12,500 positive and 12,500 negative). The unlabeled reviews, typically used for clustering or zero-shot tasks, are excluded from all experiments in this project. Since no predefined validation split is provided, we reserve 20% of the training data for validation. This results in 20,000 training samples (10,000 positive, 10,000 negative) and 5,000 validation samples (2,500 positive, 2,500 negative).
+
+To download and prepared the dataset, run the following script:
+
+```shell
+pip prepare_dataset.py
+```
+
+## Model Training
+
+The `train.py` script is the central entry point for model training. It automatically selects the appropriate trainer script based on the specified training strategy.
+
+### Usage:
+`` python train.py <train_strategy> [additional arguments] ``
+
+### Supported Training Strategies:
+
+| Strategy         | Description                                  | Trainer Script                      |
+|------------------|----------------------------------------------|-------------------------------------|
+| `ml_bow`          | Train classical ML models on Bag-of-Words    | `trainers/ml_bagofwords.py`         |
+| `ml_wv`           | Train classical ML models on word embeddings | `trainers/ml_wordvectors.py`        |
+| `fcn_bow`         | Train Fully Connected Networks on BoW        | `trainers/fcn_bagofwords.py`        |
+| `fcn_wv`          | Train Fully Connected Networks on word vectors | `trainers/fcn_wordvectors.py`     |
+| `lstm_wv`         | Train LSTM models using word vectors         | `trainers/lstm_wordvectors.py`      |
+| `transformer_wv`  | Train custom Transformer models              | `trainers/transformer_wordvectors.py` |
+| `llm`             | Fine-tune pretrained large language models (DistilBERT, RoBERTa) | `trainers/llm.py` |
+
+If an invalid strategy is provided, the script will exit with an error.
+
+Each train_strategy have their own set off required arguments which will be explain in the next part:
+
+---
 
 
