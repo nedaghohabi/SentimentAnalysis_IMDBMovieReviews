@@ -16,7 +16,7 @@ Email: [ghohabiesfahani.n@northeastern.edu](mailto:ghohabiesfahani.n@northeaster
    - [Modeling Approaches](#Modeling-Approaches)
      - [Classical ML models](#Classical-ML-models)
      - [Deep learning models](#Deep-learning-models) 
-     - [Transformer models](#Transformer based-models)  
+     - [Transformer models](#Transformer-models)  
 5. [Environment](#environment)  
  
 7. [Results and Conclusion](#results-and-conclusion)  
