@@ -13,13 +13,13 @@ Email: [ghohabiesfahani.n@northeastern.edu](mailto:ghohabiesfahani.n@northeaster
 > Before running the demo, please ensure that all required libraries are installed and the environment is properly set up by following the instructions provided in the Environment section.
 > 🔴 *Note: Failing to install the required packages or correctly set up the dataset may result in errors during the demo.*
 
-## 🚀 Demo Instructions
+## Demo Instructions
 
 To quickly run a demo of this repository:
 
 Run the demo script:
 ```{python}
-python run_scripts.py [--text "I lived the movie" [--cpu]
+python run_scripts.py [--text "I loved the movie" [--cpu]
 ```
 Arguments:
 - `--cpu` :To force CPU training if GPU is not available or desired
