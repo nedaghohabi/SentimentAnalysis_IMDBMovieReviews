@@ -45,8 +45,10 @@ Native tokenizers (WordPiece, Byte-Pair Encoding) for Transformer models.
 
 ### Classical ML models
 Logistic Regression, Random Forest.
+
 ### Deep learning models
 Fully Connected Networks (FCNs), Recurrent Neural Networks (RNNs), and Long Short-Term Memory Networks (LSTMs).
+
 ### Transformer models
 Custom Transformers trained from scratch and fine-tuned pretrained models (DistilBERT, RoBERTa), using various fine-tuning strategies.
 Evaluation:
