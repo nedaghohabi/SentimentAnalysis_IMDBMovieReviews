@@ -113,6 +113,7 @@ def main():
     nltk.download("stopwords", quiet=True)
     nltk.download("punkt", quiet=True)
     nltk.download("omw-1.4", quiet=True)
+    nltk.download("punkt-tab", quiet=True)
 
     dict_path = "frequency_dictionary_en_82_765.txt"
     download_symspell_dictionary(dict_path)
