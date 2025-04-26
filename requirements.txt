@@ -75,7 +75,6 @@ jupyterlab_pygments @ file:///home/conda/feedstock_root/build_artifacts/jupyterl
 jupyterlab_server @ file:///home/conda/feedstock_root/build_artifacts/jupyterlab_server_1733599573484/work
 jupyterlab_widgets==3.0.14
 kiwisolver==1.4.8
-lib_pod5==0.3.23
 llvmlite==0.44.0
 MarkupSafe @ file:///home/conda/feedstock_root/build_artifacts/markupsafe_1733219680183/work
 matplotlib==3.10.1
@@ -117,7 +116,6 @@ pillow==11.1.0
 pkgutil_resolve_name @ file:///home/conda/feedstock_root/build_artifacts/pkgutil-resolve-name_1733344503739/work
 platformdirs @ file:///home/conda/feedstock_root/build_artifacts/platformdirs_1733232627818/work
 plotly @ file:///home/conda/feedstock_root/build_artifacts/plotly_1742240435426/work
-pod5==0.3.23
 polars==0.20.31
 progressbar2==4.5.0
 prometheus_client @ file:///home/conda/feedstock_root/build_artifacts/prometheus_client_1733327310477/work
