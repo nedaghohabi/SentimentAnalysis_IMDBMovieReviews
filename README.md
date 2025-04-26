@@ -10,11 +10,30 @@ Email: [ghohabiesfahani.n@northeastern.edu](mailto:ghohabiesfahani.n@northeaster
 > ## ⚠️ Important Notice
 > 
 > **To demo the repository**, please refer to the instructions provided below.  
-> Make sure you have the required environment set up first by installing dependencies via `requirements.txt`.  
-> Further steps to run the demo will be detailed shortly.
->
+> Before running the demo, please ensure that all required libraries are installed and the environment is properly set up by following the instructions provided in the Environment section.
 > 🔴 *Note: Failing to install the required packages or correctly set up the dataset may result in errors during the demo.*
 
+## 🚀 Demo Instructions
+
+To quickly run a demo of this repository:
+
+Run the demo script:
+```{python}
+python run_scripts.py [--text "I lived the movie" [--cpu]
+```
+Arguments:
+- `--cpu` :To force CPU training if GPU is not available or desired
+- `--text`: To classify a custom review text,
+
+
+This script will:
+- Download and prepare the IMDb dataset.
+- Train a Logistic Regression model on TF-IDF representations.
+- Perform inference on a provided sample review (default: "I really liked the movie").
+- Train a Fully Connected Network (FCN) using pretrained Word2Vec embeddings.
+- Perform inference again using the FCN model.
+
+You will need additional info including logs and required files to reuse the trained models in `./results` directory.
 
 ## Table of Contents
 
