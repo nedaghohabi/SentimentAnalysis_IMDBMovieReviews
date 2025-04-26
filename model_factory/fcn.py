@@ -1,5 +1,4 @@
 import torch
-
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -18,9 +17,6 @@ class FCN(nn.Module):
         x = self.fc3(x)
         return {"sentiment": x}
     
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 class FCNWithW2VEmbedding(nn.Module):
     def __init__(self, embedding_weights, freeze_embeddings, aggregator, hidden_size, output_size, dropout_rate=0.3):

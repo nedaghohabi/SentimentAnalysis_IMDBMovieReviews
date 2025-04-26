@@ -68,11 +68,19 @@ def parse_args():
     parser.add_argument(
         "--batch_size", type=int, default=32, help="Batch size for training the model"
     )
+    
     parser.add_argument(
         "--base_lr",
         type=float,
         default=0.001,
         help="Initial learning rate for training",
+    )
+    
+    parser.add_argument(
+        "--hidden_size",
+        type=int,
+        default=128,
+        help="Hidden size of the FCN",
     )
 
     # Output directory
@@ -177,7 +185,7 @@ def main():
 
     logger.log_message("Preparing model...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = FCN(input_size=X_train.shape[1], hidden_size=128, output_size=2)
+    model = FCN(input_size=X_train.shape[1], hidden_size=args.hidden_size, output_size=2)
     model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.base_lr)
     criterion = nn.CrossEntropyLoss()
@@ -308,10 +316,12 @@ def main():
     )
 
     # Save model and vectorizer
-    torch.save(
-        model.state_dict(),
-        osp.join(args.output_dir, "model.pth"),
-    )
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "input_size": X_train.shape[1],
+        "hidden_size": args.hidden_size,
+        "output_size": 2
+    }, osp.join(args.output_dir, "model.pth"))
     joblib.dump(vectorizer, osp.join(args.output_dir, "vectorizer.pkl"))
     logger.log_message(f"Model and vectorizer saved to {args.output_dir}")
 

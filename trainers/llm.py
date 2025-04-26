@@ -14,6 +14,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
 from feeder.utils import load_and_split_data
+from sklearn.metrics import classification_report
 
 import torch
 from transformers import (
@@ -39,8 +40,8 @@ def load_and_prepare_datasets(input_csv):
     return train_ds, val_ds, test_ds
 
 
-def tokenize_datasets(train_ds, val_ds, test_ds, tokenizer):
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer)
+def tokenize_datasets(train_ds, val_ds, test_ds, tokenizer_adr):
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_adr)
     def tokenize(example):
         return tokenizer(example["review"], truncation=True, padding="max_length", max_length=512)
 
@@ -79,6 +80,7 @@ def main(args):
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         eval_strategy="epoch",
+        save_strategy="no",           # DON'T save intermediate checkpoints
         save_strategy="epoch",
         logging_dir=args.logging_dir,
         per_device_train_batch_size=args.train_batch_size,
@@ -116,6 +118,15 @@ def main(args):
     print("Validation results:", val_metrics)
     print("Test results:", test_metrics)
 
+    # Predict on test set
+    preds_output = trainer.predict(test_ds)
+    preds = preds_output.predictions.argmax(axis=-1)
+    labels = preds_output.label_ids
+
+    # Print classification report
+    print("Test Classification Report:")
+    print(classification_report(labels, preds, digits=6))
+
     # Optional: evaluate on training data too
     train_metrics = trainer.evaluate(train_ds)
 
@@ -129,6 +140,9 @@ def main(args):
         "test_accuracy": test_metrics.get("eval_accuracy", None),
     }
 
+    
+    model.save_pretrained(os.path.join(args.output_dir, "best_model"))
+    tokenizer.save_pretrained(os.path.join(args.output_dir, "best_model"))
     os.makedirs(args.output_dir, exist_ok=True)    
     pd.DataFrame([log_data]).to_csv(
         osp.join(args.output_dir, "time_accuracy_logs.csv"), index=False
